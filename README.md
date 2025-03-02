@@ -5,7 +5,7 @@
 - Prend le premier fichier MP3 trouvé (sinon remplacez mp3 par mp4)
 - Charge le modèle Whisper (small pour un bon équilibre vitesse/précision - sinon utilisez tiny ou base pour un résultat plus rapide)
 - Transcrit l'audio
-- Sauvegarde de la transcription dans un fichier texte
+- Sauvegarde la transcription dans un fichier texte
 
 ## Whisper a besoin de FFmpeg pour lire les fichiers audio. FFmpeg n'est pas installé par défaut sous Windows, donc vous devez le télécharger et l'ajouter au PATH.
 
@@ -34,8 +34,8 @@ Si vous voyez des informations sur FFmpeg, l’installation est réussie ! 🎉
 
 ## Whisper propose différents modèles selon vos besoins :
 
-tiny → Très rapide, mais moins précis.
-base → Bonne précision, rapide.
-small → Meilleur équilibre vitesse/précision.
-medium → Précision élevée, un peu plus lent.
-large → Très précis, mais plus long à traiter.
+- tiny → Très rapide, mais moins précis.
+- base → Bonne précision, rapide.
+- small → Meilleur équilibre vitesse/précision.
+- medium → Précision élevée, un peu plus lent.
+- large → Très précis, mais plus long à traiter.
