@@ -1,0 +1,58 @@
+import whisper
+import os
+import glob
+import openai
+
+# 📌 Configuration
+openai.api_key = os.getenv("OPENAI_API_KEY")  # Assure-toi que la clé est bien définie
+
+# 🔍 Rechercher tous les fichiers MP4 et MP3
+audio_files = glob.glob("*.mp4") + glob.glob("*.mp3")
+
+if not audio_files:
+    print("❌ Aucun fichier MP4 ou MP3 trouvé.")
+    exit()
+
+# 🚀 Charger le modèle Whisper
+model = whisper.load_model("tiny")
+
+# 🔁 Boucle sur chaque fichier audio
+for audio_file in audio_files:
+    print(f"🎵 Fichier trouvé : {audio_file}")
+    print("⏳ Transcription en cours...")
+
+    # 🎙️ Transcription
+    result = model.transcribe(audio_file)
+    transcription = result["text"]
+
+    # 📝 Fichier de transcription
+    transcript_filename = os.path.splitext(audio_file)[0] + "_transcription.txt"
+    with open(transcript_filename, "w", encoding="utf-8") as f:
+        f.write(transcription)
+    print(f"✅ Transcription enregistrée : {transcript_filename}")
+
+    # 🤖 Demande à GPT-3.5 de faire un compte rendu
+    print("🧠 Génération du compte rendu avec GPT-3.5-turbo...")
+
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Tu es un assistant qui rédige des comptes rendus professionnels."},
+                {"role": "user", "content": f"Voici une transcription brute d'un audio. Peux-tu en faire un compte rendu clair et structuré ?\n\n{transcription}"}
+            ],
+            temperature=0.7,
+            max_tokens=1000
+        )
+
+        compte_rendu = response.choices[0].message.content
+
+        # 💾 Sauvegarde du compte rendu
+        summary_filename = os.path.splitext(audio_file)[0] + "_compte_rendu.txt"
+        with open(summary_filename, "w", encoding="utf-8") as f:
+            f.write(compte_rendu)
+
+        print(f"📄 Compte rendu enregistré : {summary_filename}")
+
+    except Exception as e:
+        print(f"❌ Erreur lors de la génération du compte rendu : {e}")
