@@ -1,0 +1,112 @@
+import os
+import glob
+import whisper
+import tiktoken
+from openai import OpenAI
+
+# 🔐 Clé API OpenAI en dur (⚠️ garde ça confidentiel)
+client = OpenAI(api_key="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+
+# 📁 Création des dossiers de sortie
+os.makedirs("transcriptions", exist_ok=True)
+os.makedirs("comptes_rendus", exist_ok=True)
+
+# 🔍 Recherche des fichiers audio
+audio_files = glob.glob("*.mp3") + glob.glob("*.mp4")
+if not audio_files:
+    print("❌ Aucun fichier audio trouvé.")
+    exit()
+
+# 🚀 Chargement du modèle Whisper
+model = whisper.load_model("small", device="cuda")
+
+# ⚙️ Paramètres de découpage et tokenisation
+encoding = tiktoken.get_encoding("cl100k_base")
+max_chunk_tokens = 10000
+max_response_tokens = 2000
+MAX_TOTAL_TOKENS = 128000
+
+# 🔁 Traitement de chaque fichier audio
+for audio_file in audio_files:
+    print(f"\n🎵 Fichier détecté : {audio_file}")
+    print("⏳ Transcription en cours...")
+
+    try:
+        result = model.transcribe(audio_file)
+        transcription = result["text"]
+    except Exception as e:
+        print(f"❌ Erreur lors de la transcription : {e}")
+        continue
+
+    # 💾 Sauvegarde de la transcription
+    base_name = os.path.splitext(audio_file)[0]
+    transcript_path = os.path.join("transcriptions", f"{base_name}_transcription.txt")
+    with open(transcript_path, "w", encoding="utf-8") as f:
+        f.write(transcription)
+    print(f"✅ Transcription enregistrée : {transcript_path}")
+
+    # ✂️ Découpage de la transcription si besoin
+    def split_text(text, max_tokens):
+        words = text.split()
+        chunks = []
+        current = []
+        count = 0
+
+        for word in words:
+            t = len(encoding.encode(word + " "))
+            if count + t > max_tokens:
+                chunks.append(" ".join(current))
+                current = [word]
+                count = t
+            else:
+                current.append(word)
+                count += t
+
+        if current:
+            chunks.append(" ".join(current))
+        return chunks
+
+    chunks = split_text(transcription, max_chunk_tokens)
+    print(f"📚 Transcription découpée en {len(chunks)} sections.")
+
+    partial_summaries = []
+
+    # 🤖 Résumé de chaque chunk
+    for i, chunk in enumerate(chunks):
+        print(f"🧠 Génération du résumé pour la section {i+1}/{len(chunks)}...")
+
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4-turbo",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "Tu es un assistant qui rédige des comptes rendus professionnels."
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Voici une portion de la transcription approximative d’une réunion. Fais un compte rendu structuré. \n\n{chunk}"
+                    }
+                ],
+                temperature=0.7,
+                max_tokens=max_response_tokens
+            )
+
+            summary = response.choices[0].message.content.strip()
+            partial_summaries.append(summary)
+
+            # 🔸 Sauvegarde du résumé partiel
+            part_path = os.path.join("comptes_rendus", f"{base_name}_part_{i+1}.txt")
+            with open(part_path, "w", encoding="utf-8") as f:
+                f.write(summary)
+
+        except Exception as e:
+            print(f"❌ Erreur section {i+1} : {e}")
+
+    # 🧩 Fusion des résumés partiels
+    final_report = "\n\n---\n\n".join(partial_summaries)
+    final_path = os.path.join("comptes_rendus", f"{base_name}_compte_rendu.txt")
+    with open(final_path, "w", encoding="utf-8") as f:
+        f.write(final_report)
+
+    print(f"✅ Compte rendu final généré : {final_path}")
