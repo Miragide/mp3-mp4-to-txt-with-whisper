@@ -1,58 +1,116 @@
-import whisper
 import os
 import glob
-import openai
+import whisper
+import tiktoken
+import torch
+from openai import OpenAI
 
-# 📌 Configuration
-openai.api_key = os.getenv("OPENAI_API_KEY")  # Assure-toi que la clé est bien définie
+# 🔐 Clé API OpenAI en dur (⚠️ garde ça confidentiel)
+client = OpenAI(api_key="sk-etc")
 
-# 🔍 Rechercher tous les fichiers MP4 et MP3
-audio_files = glob.glob("*.mp4") + glob.glob("*.mp3")
+# 📁 Création des dossiers de sortie
+os.makedirs("transcriptions", exist_ok=True)
+os.makedirs("comptes_rendus", exist_ok=True)
 
+# 🔍 Recherche des fichiers audio
+audio_files = glob.glob("*.mp3") + glob.glob("*.mp4")
 if not audio_files:
-    print("❌ Aucun fichier MP4 ou MP3 trouvé.")
+    print("❌ Aucun fichier audio trouvé.")
     exit()
 
-# 🚀 Charger le modèle Whisper
-model = whisper.load_model("tiny")
+# 🚀 Chargement du modèle Whisper avec détection auto GPU/CPU
+device = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"⚙️ Chargement du modèle Whisper sur : {device.upper()}")
+model = whisper.load_model("small", device=device)
 
-# 🔁 Boucle sur chaque fichier audio
+# ⚙️ Paramètres de découpage et tokenisation
+encoding = tiktoken.get_encoding("cl100k_base")
+max_chunk_tokens = 10000
+max_response_tokens = 2000
+MAX_TOTAL_TOKENS = 128000
+
+# 🔁 Traitement de chaque fichier audio
 for audio_file in audio_files:
-    print(f"🎵 Fichier trouvé : {audio_file}")
+    print(f"\n🎵 Fichier détecté : {audio_file}")
     print("⏳ Transcription en cours...")
 
-    # 🎙️ Transcription
-    result = model.transcribe(audio_file)
-    transcription = result["text"]
-
-    # 📝 Fichier de transcription
-    transcript_filename = os.path.splitext(audio_file)[0] + "_transcription.txt"
-    with open(transcript_filename, "w", encoding="utf-8") as f:
-        f.write(transcription)
-    print(f"✅ Transcription enregistrée : {transcript_filename}")
-
-    # 🤖 Demande à GPT-3.5 de faire un compte rendu
-    print("🧠 Génération du compte rendu avec GPT-3.5-turbo...")
-
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "Tu es un assistant qui rédige des comptes rendus professionnels."},
-                {"role": "user", "content": f"Voici une transcription brute d'un audio. Peux-tu en faire un compte rendu clair et structuré ?\n\n{transcription}"}
-            ],
-            temperature=0.7,
-            max_tokens=1000
-        )
-
-        compte_rendu = response.choices[0].message.content
-
-        # 💾 Sauvegarde du compte rendu
-        summary_filename = os.path.splitext(audio_file)[0] + "_compte_rendu.txt"
-        with open(summary_filename, "w", encoding="utf-8") as f:
-            f.write(compte_rendu)
-
-        print(f"📄 Compte rendu enregistré : {summary_filename}")
-
+        result = model.transcribe(audio_file)
+        transcription = result["text"]
     except Exception as e:
-        print(f"❌ Erreur lors de la génération du compte rendu : {e}")
+        print(f"❌ Erreur lors de la transcription : {e}")
+        continue
+
+    # 💾 Sauvegarde de la transcription
+    base_name = os.path.splitext(audio_file)[0]
+    transcript_path = os.path.join("transcriptions", f"{base_name}_transcription.txt")
+    with open(transcript_path, "w", encoding="utf-8") as f:
+        f.write(transcription)
+    print(f"✅ Transcription enregistrée : {transcript_path}")
+
+    # ✂️ Découpage de la transcription si besoin
+    def split_text(text, max_tokens):
+        words = text.split()
+        chunks = []
+        current = []
+        count = 0
+
+        for word in words:
+            t = len(encoding.encode(word + " "))
+            if count + t > max_tokens:
+                chunks.append(" ".join(current))
+                current = [word]
+                count = t
+            else:
+                current.append(word)
+                count += t
+
+        if current:
+            chunks.append(" ".join(current))
+        return chunks
+
+    chunks = split_text(transcription, max_chunk_tokens)
+    print(f"📚 Transcription découpée en {len(chunks)} sections.")
+
+    partial_summaries = []
+
+    # 🤖 Résumé de chaque chunk
+    for i, chunk in enumerate(chunks):
+        print(f"🧠 Génération du résumé pour la section {i+1}/{len(chunks)}...")
+
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4-turbo",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "Tu es un assistant qui rédige des comptes rendus professionnels de cours et coaching."
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Voici une portion de la transcription approximative d'un cours. Fais un compte rendu structuré :\n\n{chunk}"
+                    }
+                ],
+                temperature=0.7,
+                max_tokens=max_response_tokens
+            )
+
+            summary = response.choices[0].message.content.strip()
+            partial_summaries.append(summary)
+
+            # 🔸 Sauvegarde du résumé partiel
+            part_path = os.path.join("comptes_rendus", f"{base_name}_part_{i+1}.txt")
+            with open(part_path, "w", encoding="utf-8") as f:
+                f.write(summary)
+
+        except Exception as e:
+            print(f"❌ Erreur section {i+1} : {e}")
+
+    # 🧩 Fusion des résumés partiels
+    final_report = "\n\n---\n\n".join(partial_summaries)
+    final_path = os.path.join("comptes_rendus", f"{base_name}_compte_rendu.txt")
+    with open(final_path, "w", encoding="utf-8") as f:
+        f.write(final_report)
+
+    print(f"✅ Compte rendu final généré : {final_path}")
+
